@@ -23,6 +23,16 @@ async function run() {
 
     const db = client.db("oticket");
 
+    const userCollection = db.collection("users");
+    const ticketsCollection = db.collection("tickets");
+    const paymentCollection = db.collection("payments");
+
+    app.get("/tickets", async (req, res) => {
+      const cursor = ticketsCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
