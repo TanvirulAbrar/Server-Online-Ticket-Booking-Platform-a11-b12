@@ -27,6 +27,20 @@ async function run() {
     const ticketsCollection = db.collection("tickets");
     const paymentCollection = db.collection("payments");
 
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      user.role = "user";
+      user.createdAt = new Date();
+      const email = user.email;
+      const userExists = await userCollection.findOne({ email });
+
+      if (userExists) {
+        return res.send({ message: "user exists" });
+      }
+
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
     app.get("/tickets", async (req, res) => {
       const cursor = ticketsCollection.find();
       const result = await cursor.toArray();
