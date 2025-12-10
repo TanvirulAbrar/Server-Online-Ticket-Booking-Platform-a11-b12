@@ -46,6 +46,13 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
+    app.get("/tickets/:id", async (req, res) => {
+      const id = req.params;
+      const query = { _id: new ObjectId(id) };
+      console.log(id);
+      const result = await ticketsCollection.findOne(query);
+      res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
