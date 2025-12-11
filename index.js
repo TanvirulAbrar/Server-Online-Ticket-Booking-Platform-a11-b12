@@ -27,6 +27,11 @@ async function run() {
     const ticketsCollection = db.collection("tickets");
     const paymentCollection = db.collection("payments");
 
+    app.get("/users", async (req, res) => {
+      const email = req.query.email;
+      const result = await userCollection.findOne({ email });
+      res.send(result);
+    });
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "user";
@@ -41,6 +46,7 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+
     app.get("/tickets", async (req, res) => {
       const cursor = ticketsCollection.find();
       const result = await cursor.toArray();
