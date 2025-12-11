@@ -25,6 +25,7 @@ async function run() {
 
     const userCollection = db.collection("users");
     const ticketsCollection = db.collection("tickets");
+    const bookedticketCollection = db.collection("bookedticket");
     const paymentCollection = db.collection("payments");
 
     //user
@@ -52,15 +53,37 @@ async function run() {
       res.send(result);
     });
     //bookedticket
+    app.get("/booked-tickets", async (req, res) => {
+      const TicketId = req.query.TicketId;
+      const email = req.query.email;
+      const query = {};
+      if (TicketId) {
+        query.TicketId = TicketId;
+      }
+      if (email) {
+        query.email = email;
+      }
+      console.log(TicketId);
+      const cursor = await bookedticketCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+    app.get("/booked-tickets/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      console.log(id);
+      const result = await bookedticketCollection.findOne(query);
+      res.send(result);
+    });
     app.post("/booked-tickets", async (req, res) => {
       const newBookedTicket = req.body;
 
       newBookedTicket.createdAt = new Date();
-      const email = newBookedTicket.email;
-      const userExists = await userCollection.findOne({ email });
+      const TicketId = newBookedTicket.TicketId;
+      const userExists = await userCollection.findOne({ TicketId });
 
       if (userExists) {
-        return res.send({ message: "user exists" });
+        return res.send({ message: "ticket exist" });
       }
 
       const result = await userCollection.insertOne(newBookedTicket);
