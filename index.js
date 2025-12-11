@@ -51,6 +51,22 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+    //bookedticket
+    app.post("/booked-tickets", async (req, res) => {
+      const newBookedTicket = req.body;
+
+      newBookedTicket.createdAt = new Date();
+      const email = newBookedTicket.email;
+      const userExists = await userCollection.findOne({ email });
+
+      if (userExists) {
+        return res.send({ message: "user exists" });
+      }
+
+      const result = await userCollection.insertOne(newBookedTicket);
+      res.send(result);
+    });
+
     //payments
     app.get("/payments", async (req, res) => {
       const email = req.query.email;
