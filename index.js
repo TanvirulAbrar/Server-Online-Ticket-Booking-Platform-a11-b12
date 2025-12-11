@@ -47,10 +47,21 @@ async function run() {
       res.send(result);
     });
     app.get("/tickets/:id", async (req, res) => {
-      const id = req.params;
+      const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       console.log(id);
       const result = await ticketsCollection.findOne(query);
+      res.send(result);
+    });
+    app.patch("/tickets/:id", async (req, res) => {
+      const id = req.params.id;
+      const newTicket = req.body;
+
+      const query = { _id: new ObjectId(id) };
+      const update = {
+        $set: newTicket,
+      };
+      const result = await ticketsCollection.updateOne(query, update);
       res.send(result);
     });
 
