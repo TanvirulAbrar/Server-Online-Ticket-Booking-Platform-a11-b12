@@ -27,9 +27,14 @@ async function run() {
     const ticketsCollection = db.collection("tickets");
     const paymentCollection = db.collection("payments");
 
+    //user
     app.get("/users", async (req, res) => {
       const email = req.query.email;
-      const result = await userCollection.findOne({ email });
+      const query = {};
+      if (email) {
+        query.email = email;
+      }
+      const result = await userCollection.findOne(query);
       res.send(result);
     });
     app.post("/users", async (req, res) => {
@@ -46,7 +51,19 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+    //payments
+    app.get("/payments", async (req, res) => {
+      const email = req.query.email;
+      const query = {};
+      if (email) {
+        query.email = email;
+      }
+      const cursor = await userCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
 
+    // ticket
     app.get("/tickets", async (req, res) => {
       const cursor = ticketsCollection.find();
       const result = await cursor.toArray();
