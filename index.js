@@ -63,7 +63,7 @@ async function run() {
       if (email) {
         query.email = email;
       }
-      console.log(TicketId);
+
       const cursor = await bookedticketCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
@@ -75,18 +75,40 @@ async function run() {
       const result = await bookedticketCollection.findOne(query);
       res.send(result);
     });
+
     app.post("/booked-tickets", async (req, res) => {
       const newBookedTicket = req.body;
 
       newBookedTicket.createdAt = new Date();
       const TicketId = newBookedTicket.TicketId;
-      const userExists = await userCollection.findOne({ TicketId });
+      const userExists = await bookedticketCollection.findOne({ TicketId });
 
       if (userExists) {
         return res.send({ message: "ticket exist" });
       }
 
-      const result = await userCollection.insertOne(newBookedTicket);
+      const result = await bookedticketCollection.insertOne(newBookedTicket);
+      res.send(result);
+    });
+    app.patch("/booked-tickets/:id", async (req, res) => {
+      const id = req.params.id;
+      const newBookedTicket = req.body;
+      newBookedTicket.createdAt = new Date();
+
+      const query = { _id: new ObjectId(id) };
+      const update = {
+        $set: newBookedTicket,
+      };
+      const result = await bookedticketCollection.updateOne(query, update);
+      res.send(result);
+    });
+    app.delete("/booked-tickets/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const query = { _id: new ObjectId(id) };
+      console.log("deleted", id);
+      const result = await bookedticketCollection.deleteOne(query);
+
       res.send(result);
     });
 
