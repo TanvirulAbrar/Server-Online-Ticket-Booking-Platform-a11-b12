@@ -35,7 +35,8 @@ async function run() {
       if (email) {
         query.email = email;
       }
-      const result = await userCollection.findOne(query);
+      const cursor = await userCollection.find(query);
+      const result = await cursor.toArray();
       res.send(result);
     });
     app.post("/users", async (req, res) => {
@@ -52,6 +53,27 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
+    app.patch("/users/:id/role", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const user = req.body;
+      console.log("hited user");
+      const update = { $set: user };
+      if (user?.role === "fraud") {
+        await bookedticketCollection.updateMany(
+          { createdBy: user.email },
+          { $set: { state: "hidden" } }
+        );
+
+        await ticketsCollection.updateMany(
+          { email: user.email },
+          { $set: { state: "hidden" } }
+        );
+      }
+
+      const result = await userCollection.updateOne(query, update);
+      res.send(result);
+    });
     //bookedticket
     app.get("/booked-tickets", async (req, res) => {
       const TicketId = req.query.TicketId;
@@ -64,7 +86,10 @@ async function run() {
         query.email = email;
       }
 
-      const cursor = await bookedticketCollection.find(query);
+      const cursor = await bookedticketCollection.find({
+        ...query,
+        state: { $ne: "hidden" },
+      });
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -73,7 +98,53 @@ async function run() {
       const query = { _id: new ObjectId(id) };
       console.log(id);
       const result = await bookedticketCollection.findOne(query);
+      let user = {};
+
+      if (result) {
+        const email = result.email;
+        user = await userCollection.findOne({ email });
+      }
+      if (user?.role === "fraud") {
+        result.state = "hidden";
+      }
+      console.log(result);
       res.send(result);
+    });
+    app.patch("/booked-tickets/:id/state", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      console.log(id);
+      const bookedticket = await bookedticketCollection.findOne(query);
+      let user = {};
+      let ticket = {};
+
+      if (bookedticket) {
+        const email = bookedticket.email;
+        user = await userCollection.findOne({ email });
+        const TicketId = { _id: new ObjectId(bookedticket.TicketId) };
+        ticket = await ticketsCollection.findOne({ TicketId });
+      }
+      if (user?.role === "fraud" || !ticket) {
+        bookedticket.state = "hidden";
+        const updateBookedTicket = {
+          $set: {
+            TicketId: bookedticket.TicketId,
+            email: bookedticket.email,
+            price: bookedticket.price,
+            quantity: bookedticket.quantity,
+            state: "hidden",
+            createdAt: bookedticket.createdAt,
+          },
+        };
+        const result = await bookedticketCollection.updateOne(
+          query,
+          updateBookedTicket
+        );
+        return res.send(null);
+      }
+
+      console.log(bookedticket);
+      res.send(bookedticket);
     });
 
     app.post("/booked-tickets", async (req, res) => {
@@ -133,8 +204,19 @@ async function run() {
     app.get("/tickets/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
-      console.log(id);
+      // console.log(id);
       const result = await ticketsCollection.findOne(query);
+      let user = {};
+
+      if (result) {
+        const email = result.email;
+        user = await userCollection.findOne({ email });
+      }
+      if (user?.role === "fraud") {
+        result.state = "hidden";
+      }
+      // console.log("tic", result);
+      // console.log("tic", id);
       res.send(result);
     });
     app.patch("/tickets/:id", async (req, res) => {
