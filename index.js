@@ -197,7 +197,17 @@ async function run() {
 
     // ticket
     app.get("/tickets", async (req, res) => {
-      const cursor = ticketsCollection.find();
+      const state = req.query.state;
+      const email = req.query.email;
+      const query = {};
+      if (state) {
+        query.state = state;
+      }
+      if (email) {
+        query.email = email;
+      }
+
+      const cursor = ticketsCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -217,6 +227,15 @@ async function run() {
       }
       // console.log("tic", result);
       // console.log("tic", id);
+      res.send(result);
+    });
+    app.post("/tickets", async (req, res) => {
+      const ticket = req.body;
+
+      ticket.state = "pending";
+
+      const result = ticketsCollection.insertOne(ticket);
+      // const result = await cursor.toArray();
       res.send(result);
     });
     app.patch("/tickets/:id", async (req, res) => {
