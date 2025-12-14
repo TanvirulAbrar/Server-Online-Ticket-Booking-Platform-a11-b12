@@ -57,7 +57,7 @@ async function run() {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const user = req.body;
-      console.log("hited user");
+      // console.log("hited user");
       const update = { $set: user };
       if (user?.role === "fraud") {
         await bookedticketCollection.updateMany(
@@ -68,6 +68,16 @@ async function run() {
         await ticketsCollection.updateMany(
           { email: user.email },
           { $set: { state: "hidden" } }
+        );
+      } else {
+        await bookedticketCollection.updateMany(
+          { createdBy: user.email },
+          { $set: { state: "pending" } }
+        );
+
+        await ticketsCollection.updateMany(
+          { email: user.email },
+          { $set: { state: "pending" } }
         );
       }
 
@@ -247,6 +257,17 @@ async function run() {
         $set: newTicket,
       };
       const result = await ticketsCollection.updateOne(query, update);
+      res.send(result);
+    });
+    app.delete("/tickets/:id", async (req, res) => {
+      const id = req.params.id;
+      // const newTicket = req.body;
+
+      const query = { _id: new ObjectId(id) };
+      // const update = {
+      //   $set: newTicket,
+      // };
+      const result = await ticketsCollection.deleteOne(query);
       res.send(result);
     });
 
