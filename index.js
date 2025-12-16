@@ -28,6 +28,7 @@ async function run() {
     const ticketsCollection = db.collection("tickets");
     const bookedticketCollection = db.collection("bookedticket");
     const paymentCollection = db.collection("payments");
+    const revenueCollection = db.collection("revenues");
 
     //user
     app.get("/users", async (req, res) => {
@@ -110,7 +111,7 @@ async function run() {
     });
     app.get("/booked-tickets/:id", async (req, res) => {
       const id = req.params.id;
-      console.log(id);
+      //console.log(id);
       const query = { _id: new ObjectId(id) };
       const result = await bookedticketCollection.findOne(query);
       let user = {};
@@ -195,7 +196,7 @@ async function run() {
     });
     app.post("/payment-checkout-session", async (req, res) => {
       const ticketInfo = req.body;
-      const amount = parseInt(ticketInfo.cost);
+      const amount = parseInt(ticketInfo.cost * 100);
       //console.log("got it");
       const session = await stripe.checkout.sessions.create({
         line_items: [
@@ -207,7 +208,7 @@ async function run() {
                 name: `please pay for: ${ticketInfo.title}`,
               },
             },
-            quantity: ticketInfo.quantity,
+            quantity: 1,
           },
         ],
         mode: "payment",
@@ -227,10 +228,11 @@ async function run() {
     app.patch("/payment-success", async (req, res) => {
       const sessionId = req.query.session_id;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const amount = parseInt(session.amount_total / 100);
 
       const transactionId = session.payment_intent;
       // console.log("session retrieve --", session);
-      console.log("session retrieve --", session.payment_intent);
+      //console.log("session retrieve --", session.payment_intent);
 
       const query = { transactionId: transactionId };
 
@@ -251,6 +253,9 @@ async function run() {
       const ticket = await ticketsCollection.findOne({
         _id: new ObjectId(ticketId),
       });
+      const revenueData = await revenueCollection.findOne({
+        email: ticket.email,
+      });
 
       if (session.payment_status === "paid") {
         const id = session.metadata.bookedTicketId;
@@ -265,20 +270,46 @@ async function run() {
         const updateb = {
           $set: {
             quantity: Number(ticket.quantity - session.metadata.quantity),
+            revenue: Number(ticket?.revenue) + Number(amount),
           },
         };
 
-        console.log(
-          "recived 1",
-          session.metadata.quantity,
-          transactionId,
-          paymentExist ? "true" : "false"
-        );
+        // console.log(
+        //   "recived 1",
+        //   session.metadata.quantity,
+        //   transactionId,
+        //   paymentExist ? "true" : "false"
+        // );
         const result = await bookedticketCollection.updateOne(query, update);
         const resultb = await ticketsCollection.updateOne(queryb, updateb);
+        // console.log(amount);
+        if (revenueData) {
+          const revenueUpdate = {
+            $set: {
+              amount: Number(revenueData.amount + amount),
+              quantity: Number(
+                Number(revenueData.quantity) + Number(session.metadata.quantity)
+              ),
+              // revenue: Number(ticket?.revenue) + Number(amount),
+            },
+          };
+          const revenueResult = await revenueCollection.updateOne(
+            { email: ticket.email },
+            revenueUpdate
+          );
+        } else {
+          const newRevenue = {
+            email: ticket.email,
+            amount: amount,
+            // ticketId: ticket._id,
+            quantity: Number(session.metadata.quantity),
+          };
+
+          const revenueResult = await revenueCollection.insertOne(newRevenue);
+        }
 
         const payment = {
-          amount: session.amount_total,
+          amount: amount,
           quantity: session.metadata.quantity,
           currency: session.currency,
           customerEmail: session.customer_email,
@@ -294,7 +325,7 @@ async function run() {
 
         return res.send({
           success: true,
-          modifyParcel: result,
+          modify: result,
           _id: trackingId,
           transactionId: session.payment_intent,
           paymentInfo: resultPayment,
@@ -303,6 +334,22 @@ async function run() {
       return res.send({ success: false });
     });
 
+    // revenue
+    app.get("/revenues", async (req, res) => {
+      // const state = req.query.state;
+      const email = req.query.email;
+      const query = {};
+      // if (state) {
+      //   query.state = state;
+      // }
+      if (email) {
+        query.email = email;
+      }
+
+      const cursor = revenueCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
     // ticket
     app.get("/tickets", async (req, res) => {
       const state = req.query.state;
@@ -341,25 +388,44 @@ async function run() {
       const ticket = req.body;
 
       ticket.state = "pending";
+      ticket.revenue = 0;
 
       const result = ticketsCollection.insertOne(ticket);
       // const result = await cursor.toArray();
       res.send(result);
     });
+
+    // app.patch("/tickets", async (req, res) => {
+    //   const id = req.params.id;
+    //   const email = req.body.email;
+
+    //   // const query = { _id: new ObjectId(id) };
+    //   const update = {
+    //     $set: { state: "approved" },
+    //   };
+    //   const result = await ticketsCollection.updateMany(
+    //     { email: email },
+    //     update
+    //   );
+    //   res.send(result);
+    // });
     app.patch("/tickets", async (req, res) => {
-      const id = req.params.id;
       const email = req.body.email;
 
-      // const query = { _id: new ObjectId(id) };
       const update = {
-        $set: { state: "approved" },
+        $set: {
+          // state: "approved",
+          revenue: 0,
+        },
       };
+
       const result = await ticketsCollection.updateMany(
         { email: email },
         update
       );
       res.send(result);
     });
+
     app.patch("/tickets/:id", async (req, res) => {
       const id = req.params.id;
       const newTicket = req.body;
