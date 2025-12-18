@@ -6,8 +6,36 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const port = process.env.PORT || 3000;
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
 
+const admin = require("firebase-admin");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 app.use(express.json());
 app.use(cors());
+
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("decoded in the token", decoded);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+};
 
 const client = new MongoClient(process.env.DB_URI, {
   serverApi: {
@@ -30,8 +58,31 @@ async function run() {
     const paymentCollection = db.collection("payments");
     const revenueCollection = db.collection("revenues");
 
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
+    const verifyVendor = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "vendor") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
+
     //user
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyFBToken, async (req, res) => {
       const email = req.query.email;
       const query = {};
       if (email) {
@@ -39,6 +90,15 @@ async function run() {
       }
       const cursor = await userCollection.find(query);
       const result = await cursor.toArray();
+      res.send(result);
+    });
+    app.get("/users/:id/role", verifyFBToken, async (req, res) => {
+      const email = req.params.id;
+      const query = {};
+      if (email) {
+        query.email = email;
+      }
+      const result = await userCollection.findOne(query);
       res.send(result);
     });
     app.post("/users", async (req, res) => {
@@ -55,37 +115,42 @@ async function run() {
       const result = await userCollection.insertOne(user);
       res.send(result);
     });
-    app.patch("/users/:id/role", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const user = req.body;
-      // console.log("hited user");
-      const update = { $set: user };
-      if (user?.role === "fraud") {
-        await bookedticketCollection.updateMany(
-          { createdBy: user.email },
-          { $set: { state: "hidden" } }
-        );
+    app.patch(
+      "/users/:id/role",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const user = req.body;
+        // console.log("hited user");
+        const update = { $set: user };
+        if (user?.role === "fraud") {
+          await bookedticketCollection.updateMany(
+            { createdBy: user.email },
+            { $set: { state: "hidden" } }
+          );
 
-        await ticketsCollection.updateMany(
-          { email: user.email },
-          { $set: { state: "hidden" } }
-        );
-      } else {
-        await bookedticketCollection.updateMany(
-          { createdBy: user.email },
-          { $set: { state: "pending" } }
-        );
+          await ticketsCollection.updateMany(
+            { email: user.email },
+            { $set: { state: "hidden" } }
+          );
+        } else {
+          await bookedticketCollection.updateMany(
+            { createdBy: user.email },
+            { $set: { state: "pending" } }
+          );
 
-        await ticketsCollection.updateMany(
-          { email: user.email },
-          { $set: { state: "pending" } }
-        );
+          await ticketsCollection.updateMany(
+            { email: user.email },
+            { $set: { state: "pending" } }
+          );
+        }
+
+        const result = await userCollection.updateOne(query, update);
+        res.send(result);
       }
-
-      const result = await userCollection.updateOne(query, update);
-      res.send(result);
-    });
+    );
     //bookedticket
     app.get("/booked-tickets", async (req, res) => {
       const TicketId = req.query.TicketId;
@@ -127,7 +192,7 @@ async function run() {
       res.send(result);
     });
 
-    app.post("/booked-tickets", async (req, res) => {
+    app.post("/booked-tickets", verifyFBToken, async (req, res) => {
       const newBookedTicket = req.body;
 
       newBookedTicket.createdAt = new Date();
@@ -142,7 +207,7 @@ async function run() {
       //console.log("book", result);
       res.send(result);
     });
-    app.patch("/booked-tickets/:id", async (req, res) => {
+    app.patch("/booked-tickets/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const newBookedTicket = req.body;
       newBookedTicket.createdAt = new Date();
@@ -154,7 +219,7 @@ async function run() {
       const result = await bookedticketCollection.updateOne(query, update);
       res.send(result);
     });
-    app.delete("/booked-tickets/:id", async (req, res) => {
+    app.delete("/booked-tickets/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
 
       const query = { _id: new ObjectId(id) };
@@ -163,7 +228,7 @@ async function run() {
 
       res.send(result);
     });
-    app.patch("/booked-tickets/:id/state", async (req, res) => {
+    app.patch("/booked-tickets/:id/state", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const state = req.body.state;
       const query = { _id: new ObjectId(id) };
@@ -184,7 +249,7 @@ async function run() {
     });
 
     //payments
-    app.get("/payments", async (req, res) => {
+    app.get("/payments", verifyFBToken, async (req, res) => {
       const customerEmail = req.query.email;
       const query = {};
       if (customerEmail) {
@@ -194,7 +259,7 @@ async function run() {
       const result = await cursor.toArray();
       res.send(result);
     });
-    app.post("/payment-checkout-session", async (req, res) => {
+    app.post("/payment-checkout-session", verifyFBToken, async (req, res) => {
       const ticketInfo = req.body;
       const amount = parseInt(ticketInfo.cost * 100);
       //console.log("got it");
@@ -225,7 +290,7 @@ async function run() {
 
       res.send({ url: session.url });
     });
-    app.patch("/payment-success", async (req, res) => {
+    app.patch("/payment-success", verifyFBToken, async (req, res) => {
       const sessionId = req.query.session_id;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       const amount = parseInt(session.amount_total / 100);
@@ -335,7 +400,7 @@ async function run() {
     });
 
     // revenue
-    app.get("/revenues", async (req, res) => {
+    app.get("/revenues", verifyFBToken, verifyVendor, async (req, res) => {
       // const state = req.query.state;
       const email = req.query.email;
       const query = {};
@@ -354,6 +419,9 @@ async function run() {
     app.get("/tickets", async (req, res) => {
       const state = req.query.state;
       const email = req.query.email;
+      const from = req.query.from;
+      const to = req.query.to;
+      const advertise = req.query.advertise;
       const query = {};
       if (state) {
         query.state = state;
@@ -361,11 +429,100 @@ async function run() {
       if (email) {
         query.email = email;
       }
+      if (advertise) {
+        query.advertise = advertise;
+        // console.log("got it");
+      }
+      if (from && to) {
+        query.$or = [
+          { from: { $regex: from, $options: "i" } },
+          { to: { $regex: to, $options: "i" } },
+        ];
+        // query.from = from;
+        // query.to = to;
+      }
 
-      const cursor = ticketsCollection.find(query);
+      const cursor = ticketsCollection.find(query).sort({ createdAt: -1 });
+
       const result = await cursor.toArray();
       res.send(result);
     });
+    app.get("/tickets/all/:id", async (req, res) => {
+      const limit = 7;
+
+      const id = Math.abs(req.params.id);
+
+      console.log(req.query);
+      const title = req.query.title;
+      const transportType = req.query.transportType;
+      const priceSort = req.query.price;
+      // let price = 0;
+      const state = req.query.state;
+      const email = req.query.email;
+      const from = req.query.from;
+      const to = req.query.to;
+      const advertise = req.query.advertise;
+      const query = {};
+      // console.log(price);
+      const sort = {};
+
+      if (priceSort) {
+        if (priceSort === "high") {
+          sort.price = -1;
+        }
+        if (priceSort === "low") {
+          sort.price = 1;
+        }
+      }
+
+      if (transportType) {
+        query.transportType = transportType;
+      }
+      if (state) {
+        query.state = state;
+      }
+      if (email) {
+        query.email = email;
+      }
+      if (advertise) {
+        query.advertise = advertise;
+        // console.log("got it");
+      }
+      if (title) {
+        query.$or = [{ title: { $regex: title, $options: "i" } }];
+        // query.from = from;
+        // query.to = to;
+      }
+      if (from && to) {
+        query.$or = [
+          { from: { $regex: from, $options: "i" } },
+          { to: { $regex: to, $options: "i" } },
+        ];
+        // query.from = from;
+        // query.to = to;
+      }
+      console.log(sort);
+      console.log(query);
+
+      const cursor = await ticketsCollection
+        .find(query)
+        .sort(sort)
+        .skip(limit * id)
+        .limit(limit);
+
+      const result = await cursor.toArray();
+
+      const cursorall = await ticketsCollection.find(query);
+      const resultall = await cursorall.toArray();
+
+      const pageNum = Math.round(resultall.length / limit);
+      let pageArray = [];
+      for (let i = 0; i < pageNum; i++) {
+        pageArray.push(i + 1);
+      }
+      res.send({ tickets: result, pages: pageArray });
+    });
+
     app.get("/tickets/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -381,19 +538,30 @@ async function run() {
         result.state = "hidden";
       }
       // console.log("tic", result);
-      // console.log("tic", id);
+      console.log("tic", id);
       res.send(result);
     });
-    app.post("/tickets", async (req, res) => {
+    app.post("/tickets", verifyFBToken, async (req, res) => {
       const ticket = req.body;
 
       ticket.state = "pending";
+      ticket.createdAt = new Date();
+
       ticket.revenue = 0;
 
       const result = ticketsCollection.insertOne(ticket);
       // const result = await cursor.toArray();
       res.send(result);
     });
+
+    // app.post("/tickets/all", verifyAdmin, verifyVendor, async (req, res) => {
+    //   const ticketsArray = req.body;
+
+    //   // Insert all the tickets at once
+    //   const result = await ticketsCollection.insertMany(ticketsArray);
+
+    //   res.status(201).send(result);
+    // });
 
     // app.patch("/tickets", async (req, res) => {
     //   const id = req.params.id;
@@ -409,24 +577,24 @@ async function run() {
     //   );
     //   res.send(result);
     // });
-    app.patch("/tickets", async (req, res) => {
-      const email = req.body.email;
+    // app.patch("/tickets", async (req, res) => {
+    //   const email = req.body.email;
 
-      const update = {
-        $set: {
-          // state: "approved",
-          revenue: 0,
-        },
-      };
+    //   const update = {
+    //     $set: {
+    //       // state: "approved",
+    //       revenue: 0,
+    //     },
+    //   };
 
-      const result = await ticketsCollection.updateMany(
-        { email: email },
-        update
-      );
-      res.send(result);
-    });
+    //   const result = await ticketsCollection.updateMany(
+    //     { email: email },
+    //     update
+    //   );
+    //   res.send(result);
+    // });
 
-    app.patch("/tickets/:id", async (req, res) => {
+    app.patch("/tickets/:id", verifyFBToken, verifyVendor, async (req, res) => {
       const id = req.params.id;
       const newTicket = req.body;
 
@@ -437,17 +605,59 @@ async function run() {
       const result = await ticketsCollection.updateOne(query, update);
       res.send(result);
     });
-    app.delete("/tickets/:id", async (req, res) => {
-      const id = req.params.id;
-      // const newTicket = req.body;
 
-      const query = { _id: new ObjectId(id) };
-      // const update = {
-      //   $set: newTicket,
-      // };
-      const result = await ticketsCollection.deleteOne(query);
-      res.send(result);
-    });
+    app.patch(
+      "/tickets/:id/admin",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const newTicket = req.body;
+        const tickets = await ticketsCollection.find(newTicket);
+        const ticketsArray = await tickets.toArray();
+        if (ticketsArray.length >= 6) {
+          return res.send({ message: "full" });
+        }
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: newTicket,
+        };
+        const result = await ticketsCollection.updateOne(query, update);
+        res.send(result);
+      }
+    );
+    app.patch(
+      "/tickets/:id/admin-state",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const newTicket = req.body;
+
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: newTicket,
+        };
+        const result = await ticketsCollection.updateOne(query, update);
+        res.send(result);
+      }
+    );
+    app.delete(
+      "/tickets/:id",
+      verifyFBToken,
+      verifyVendor,
+      async (req, res) => {
+        const id = req.params.id;
+        // const newTicket = req.body;
+
+        const query = { _id: new ObjectId(id) };
+        // const update = {
+        //   $set: newTicket,
+        // };
+        const result = await ticketsCollection.deleteOne(query);
+        res.send(result);
+      }
+    );
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
